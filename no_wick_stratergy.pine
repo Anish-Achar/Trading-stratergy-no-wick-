@@ -3,7 +3,14 @@
 //  NO Candle Strategy (15-minute chart)
 // ============================================================================
 //  Rules
-//  • Trend: close vs EMA(200) on the chart's own bars. close == EMA = no bias.
+//  • Trend (input "Trend mode"):
+//    – Internal trend = direction of the most recent break of structure (BOS). Swings are
+//      body pivots (max/min of open, close) with N bars each side; a BOS is a candle CLOSE
+//      beyond the last unbroken swing high/low. Pivots confirm N bars late (no repaint).
+//    – EMA trend: close vs EMA(200). close == EMA = no bias.
+//    – "Internal + EMA" (default): internal trend decides; 1 BOS is enough when it agrees
+//      with the EMA side, 2 BOS in a row are needed when it is against it.
+//      "Internal only", "EMA only" and "Either" are also available.
 //  • Bullish NO candle: close > open and open == low. Bearish: close < open and
 //    open == high. Wick tolerance > 0 lets the open sit up to N ticks from the
 //    low/high. Dojis and zero-range candles never qualify (close must differ from open).
@@ -11,8 +18,8 @@
 //  • When the NO candle (candle #0) closes, a resting limit order is placed at the
 //    level. With process_orders_on_close = false it can fill on candles #1–#9
 //    (a wick touch is enough). It is cancelled when candle #9 closes.
-//  • If a confirmed candle closes against the setup's trend (or exactly on the EMA),
-//    the setup is cancelled at that close.
+//  • If, after a confirmed candle closes, the trend mode no longer allows the setup's
+//    direction, the setup is cancelled at that close.
 //  • Up to N pending setups. When full, the oldest is evicted. The first fill
 //    cancels all others.
 //  • One position at a time. NO candles are ignored while a trade is open.
@@ -53,6 +60,7 @@ strategy("NO Candle Strategy", shorttitle = "NO Candle", overlay = true,
 const color TP_COLOR  = #00E676   // vivid green: longs, TP
 const color SL_COLOR  = #FF1744   // vivid red: shorts, SL
 const color EMA_COLOR = #FF9800
+const color STRUCT_COLOR = #90A4AE   // muted: swing markers and levels
 
 const string GRP_TREND = "Trend"
 const string GRP_NO    = "NO Candle"
@@ -61,6 +69,10 @@ const string GRP_DIR   = "Directional"
 const string GRP_VIS   = "Visualization"
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
+string trendModeInput         = input.string("Internal + EMA", "Trend mode", options = ["Internal + EMA", "Internal only", "EMA only", "Either"], group = GRP_TREND,
+     tooltip = "Internal + EMA: last BOS decides; 1 BOS if it agrees with the EMA side, 2 BOS in a row if against. Either: internal OR EMA agrees.")
+int   pivotLengthInput        = input.int(2, "Swing pivot length (bars)", minval = 1, group = GRP_TREND,
+     tooltip = "Bars on each side of a body swing. A swing is confirmed this many bars after it forms.")
 int   emaLengthInput          = input.int(200, "EMA length", minval = 1, group = GRP_TREND)
 
 int   setupValidityBarsInput  = input.int(9, "Setup validity (candles)", minval = 1, maxval = 100, group = GRP_NO,
@@ -77,6 +89,7 @@ bool  enableLongsInput        = input.bool(true, "Enable longs", group = GRP_DIR
 bool  enableShortsInput       = input.bool(true, "Enable shorts", group = GRP_DIR)
 
 bool  showEmaInput            = input.bool(true,  "Show EMA", group = GRP_VIS)
+bool  showStructureInput      = input.bool(true,  "Show swings (HH/LH/HL/LL)", group = GRP_VIS)
 bool  showNoCandlesInput      = input.bool(true,  "Show NO candle markers", group = GRP_VIS)
 bool  showPendingLevelsInput  = input.bool(false, "Show pending levels", group = GRP_VIS)
 bool  showActiveSlTpInput     = input.bool(true,  "Show active SL/TP", group = GRP_VIS)
@@ -119,6 +132,14 @@ symbolText() =>
 
 directionText(int dir) =>
     dir == 1 ? "LONG" : "SHORT"
+
+// True if the selected trend mode allows trading in direction d.
+trendAllows(int d, int emaD, int internalD, int streak) =>
+    switch trendModeInput
+        "EMA only"      => emaD == d
+        "Internal only" => internalD == d
+        "Either"        => internalD == d or emaD == d
+        => internalD == d and streak >= (emaD == d ? 1 : 2)
 
 // Cancels a setup's resting order and ends its level line at endBar.
 retireSetup(NoSetup s, int endBar) =>
@@ -182,8 +203,50 @@ varip string lastExitAlertId  = ""
 // ─── Trend and NO candle detection ───────────────────────────────────────────
 bool  isFifteenMinute = timeframe.period == "15"
 float emaValue        = ta.ema(close, emaLengthInput)
-int   trendDir        = close > emaValue ? 1 : close < emaValue ? -1 : 0
+int   emaDir          = close > emaValue ? 1 : close < emaValue ? -1 : 0
 bool  historyReady    = bar_index > emaLengthInput and not na(emaValue)
+
+// ─── Internal structure: body swings and breaks of structure ─────────────────
+float bodyHigh = math.max(open, close)
+float bodyLow  = math.min(open, close)
+float pivotHi  = ta.pivothigh(bodyHigh, pivotLengthInput, pivotLengthInput)
+float pivotLo  = ta.pivotlow(bodyLow, pivotLengthInput, pivotLengthInput)
+
+var float swingHigh       = na
+var float swingLow        = na
+var bool  swingHighBroken = true
+var bool  swingLowBroken  = true
+var int   internalDir     = 0   // direction of the most recent BOS
+var int   bosStreak       = 0   // consecutive BOS in internalDir
+
+bool markHH = false
+bool markLH = false
+bool markHL = false
+bool markLL = false
+if barstate.isconfirmed
+    // New swings first (a swing confirmed on this bar can't be broken by this bar's close).
+    if not na(pivotHi)
+        markHH          := na(swingHigh) or pivotHi > swingHigh
+        markLH          := not markHH
+        swingHigh       := pivotHi
+        swingHighBroken := false
+    if not na(pivotLo)
+        markLL         := na(swingLow) or pivotLo < swingLow
+        markHL         := not markLL
+        swingLow       := pivotLo
+        swingLowBroken := false
+    // Break of structure: a close beyond the last unbroken swing. Each swing breaks once.
+    if not swingHighBroken and close > swingHigh
+        bosStreak       := internalDir == 1 ? bosStreak + 1 : 1
+        internalDir     := 1
+        swingHighBroken := true
+    if not swingLowBroken and close < swingLow
+        bosStreak      := internalDir == -1 ? bosStreak + 1 : 1
+        internalDir    := -1
+        swingLowBroken := true
+
+bool longAllowed  = trendAllows(1, emaDir, internalDir, bosStreak)
+bool shortAllowed = trendAllows(-1, emaDir, internalDir, bosStreak)
 
 // Tolerance 0 = exact equality. Otherwise a tiny epsilon absorbs float noise in the tick distance.
 float wickTolerance = wickToleranceTicksInput * syminfo.mintick + syminfo.mintick * 1e-6
@@ -246,14 +309,15 @@ if strategy.opentrades > 0
 bool newLongSetup  = false
 bool newShortSetup = false
 if barstate.isconfirmed
-    // Expire once the last valid candle has closed; cancel if this candle closed against (or exactly on) the EMA.
+    // Expire once the last valid candle has closed; cancel if the trend mode no longer allows the direction.
     if setups.size() > 0
         for i = setups.size() - 1 to 0
             NoSetup s = setups.get(i)
-            if bar_index >= s.expiryBar or trendDir != s.direction
+            bool stillAllowed = s.direction == 1 ? longAllowed : shortAllowed
+            if bar_index >= s.expiryBar or not stillAllowed
                 retireSetup(s, bar_index)
                 setups.remove(i)
-    int newDir = isBullNo and trendDir == 1 and enableLongsInput ? 1 : isBearNo and trendDir == -1 and enableShortsInput ? -1 : 0
+    int newDir = isBullNo and longAllowed and enableLongsInput ? 1 : isBearNo and shortAllowed and enableShortsInput ? -1 : 0
     if newDir != 0 and isFifteenMinute and historyReady and strategy.opentrades == 0
         while setups.size() >= maxActiveSetupsInput
             retireSetup(setups.get(0), bar_index)   // oldest first
@@ -271,6 +335,15 @@ if barstate.isconfirmed
 
 // ─── Visuals ─────────────────────────────────────────────────────────────────
 plot(showEmaInput ? emaValue : na, "EMA", color = EMA_COLOR, linewidth = 1)
+
+// Swings are drawn back on the pivot candle itself; they appear once confirmed (pivot length bars later).
+plotshape(showStructureInput and markHH ? pivotHi : na, "Swing HH", shape.diamond, location.absolute, STRUCT_COLOR, offset = -pivotLengthInput, text = "HH", textcolor = STRUCT_COLOR, size = size.tiny, display = display.pane)
+plotshape(showStructureInput and markLH ? pivotHi : na, "Swing LH", shape.diamond, location.absolute, STRUCT_COLOR, offset = -pivotLengthInput, text = "LH", textcolor = STRUCT_COLOR, size = size.tiny, display = display.pane)
+plotshape(showStructureInput and markHL ? pivotLo : na, "Swing HL", shape.diamond, location.absolute, STRUCT_COLOR, offset = -pivotLengthInput, text = "HL", textcolor = STRUCT_COLOR, size = size.tiny, display = display.pane)
+plotshape(showStructureInput and markLL ? pivotLo : na, "Swing LL", shape.diamond, location.absolute, STRUCT_COLOR, offset = -pivotLengthInput, text = "LL", textcolor = STRUCT_COLOR, size = size.tiny, display = display.pane)
+// Active (unbroken) swing levels: the line ends on the candle that closes through it (the BOS).
+plot(showStructureInput and not swingHighBroken ? swingHigh : na, "Swing high level", color = color.new(STRUCT_COLOR, 40), style = plot.style_steplinebr, display = display.pane)
+plot(showStructureInput and not swingLowBroken ? swingLow : na, "Swing low level", color = color.new(STRUCT_COLOR, 40), style = plot.style_steplinebr, display = display.pane)
 plotshape(showNoCandlesInput and newLongSetup,  "Bullish NO candle", shape.triangleup,   location.belowbar, TP_COLOR, size = size.tiny, display = display.pane)
 plotshape(showNoCandlesInput and newShortSetup, "Bearish NO candle", shape.triangledown, location.abovebar, SL_COLOR, size = size.tiny, display = display.pane)
 plotshape(showTradeCirclesInput and entryMark.barIndex == bar_index ? entryMark.price : na, "Entry", shape.circle, location.absolute,
