@@ -23,8 +23,13 @@
 //  • Up to N pending setups. When full, the oldest is evicted. The first fill
 //    cancels all others.
 //  • One position at a time. NO candles are ignored while a trade is open.
-//  • Risk = NO range × SL multiplier. SL = fill ∓ risk, TP = fill ± risk × RR,
-//    measured from the ACTUAL fill price.
+//  • Stop loss (input "Stop loss"):
+//    – "Last swing" (default): below the most recent confirmed swing low (longs) or above
+//      the most recent confirmed swing high (shorts) at the NO candle's close — the HL/LL
+//      or HH/LH marker level (or its wick), minus/plus a tick buffer. No valid swing
+//      beyond the level → no setup.
+//    – "NO range × multiplier": risk = NO range × SL multiplier from the fill.
+//    TP = fill ± (distance from fill to SL) × RR, measured from the ACTUAL fill price.
 //
 //  Execution notes
 //  • Setup creation, expiry and trend invalidation run only on barstate.isconfirmed,
@@ -82,7 +87,13 @@ int   maxActiveSetupsInput    = input.int(3, "Max pending setups", minval = 1, g
 int   wickToleranceTicksInput = input.int(0, "Wick tolerance (ticks)", minval = 0, group = GRP_NO,
      tooltip = "0 = exact: open must equal the low (bullish) or the high (bearish).")
 
-float riskMultiplierInput     = input.float(2.0, "SL multiplier (× NO candle range)", minval = 0.01, step = 0.1, group = GRP_RISK)
+string slModeInput            = input.string("Last swing", "Stop loss", options = ["Last swing", "NO range × multiplier"], group = GRP_RISK)
+int   slBufferTicksInput      = input.int(0, "Swing SL buffer (ticks)", minval = 0, group = GRP_RISK,
+     tooltip = "Breathing room beyond the swing. On 5-digit forex, 10 ticks = 1 pip.")
+bool  slUseWickInput          = input.bool(false, "Swing SL beyond the swing candle's wick", group = GRP_RISK,
+     tooltip = "Off: SL at the marked body swing (HL/LL, HH/LH). On: SL beyond that candle's wick.")
+float riskMultiplierInput     = input.float(2.0, "SL multiplier (× NO candle range)", minval = 0.01, step = 0.1, group = GRP_RISK,
+     tooltip = "Used only when Stop loss = NO range × multiplier.")
 float rrRatioInput            = input.float(1.0, "Reward:risk ratio", minval = 0.01, step = 0.1, group = GRP_RISK)
 
 bool  enableLongsInput        = input.bool(true, "Enable longs", group = GRP_DIR)
@@ -107,6 +118,7 @@ type NoSetup
     float  noRange      // noHigh - noLow
     int    creationBar  // candle #0
     int    expiryBar    // last candle allowed to touch; the order is cancelled when it closes
+    float  stopPrice    // swing SL frozen at creation; na in "NO range × multiplier" mode
     string orderId
     int    seq
     line   levelLine
@@ -160,8 +172,12 @@ processFill(ActiveTrade t, EntryMark m, array<NoSetup> pending, string fillId, f
     float level = na
     if idx >= 0
         NoSetup filled = pending.get(idx)
-        risk  := filled.noRange * riskMultiplierInput
+        risk  := na(filled.stopPrice) ? filled.noRange * riskMultiplierInput : (fillPrice - filled.stopPrice) * dir
         level := filled.level
+    // A gap can fill the limit at or beyond the swing stop: the stop is already breached.
+    bool gappedPastStop = not na(risk) and risk <= 0
+    if gappedPastStop
+        risk := na
     t.entryId := fillId
     t.level   := level
     t.slPrice := fillPrice - dir * risk
@@ -179,7 +195,9 @@ processFill(ActiveTrade t, EntryMark m, array<NoSetup> pending, string fillId, f
     if isOpen and showActiveSlTpInput and not na(risk)
         t.slLine := line.new(fillBar, t.slPrice, bar_index, t.slPrice, color = color.new(SL_COLOR, 30), style = line.style_dashed, width = 1)
         t.tpLine := line.new(fillBar, t.tpPrice, bar_index, t.tpPrice, color = color.new(TP_COLOR, 30), style = line.style_dashed, width = 1)
-    if na(risk)
+    if gappedPastStop
+        strategy.close(fillId, comment = "Gap past SL")
+    else if na(risk)
         // Unreachable by design (every entry id belongs to a stored setup), but never hold a position without a stop.
         log.error("NO Candle: no stored setup for fill {0}; closing the position.", fillId)
         strategy.close(fillId, comment = "No setup data")
@@ -212,8 +230,13 @@ float bodyLow  = math.min(open, close)
 float pivotHi  = ta.pivothigh(bodyHigh, pivotLengthInput, pivotLengthInput)
 float pivotLo  = ta.pivotlow(bodyLow, pivotLengthInput, pivotLengthInput)
 
+float pivotHiWick = high[pivotLengthInput]   // wick extreme of the candle a new swing forms on
+float pivotLoWick = low[pivotLengthInput]
+
 var float swingHigh       = na
 var float swingLow        = na
+var float swingHighWick   = na
+var float swingLowWick    = na
 var bool  swingHighBroken = true
 var bool  swingLowBroken  = true
 var int   internalDir     = 0   // direction of the most recent BOS
@@ -229,11 +252,13 @@ if barstate.isconfirmed
         markHH          := na(swingHigh) or pivotHi > swingHigh
         markLH          := not markHH
         swingHigh       := pivotHi
+        swingHighWick   := pivotHiWick
         swingHighBroken := false
     if not na(pivotLo)
         markLL         := na(swingLow) or pivotLo < swingLow
         markHL         := not markLL
         swingLow       := pivotLo
+        swingLowWick   := pivotLoWick
         swingLowBroken := false
     // Break of structure: a close beyond the last unbroken swing. Each swing breaks once.
     if not swingHighBroken and close > swingHigh
@@ -318,7 +343,12 @@ if barstate.isconfirmed
                 retireSetup(s, bar_index)
                 setups.remove(i)
     int newDir = isBullNo and longAllowed and enableLongsInput ? 1 : isBearNo and shortAllowed and enableShortsInput ? -1 : 0
-    if newDir != 0 and isFifteenMinute and historyReady and strategy.opentrades == 0
+    // Swing SL: the most recent confirmed swing as of this close (swings confirm pivot-length bars late).
+    bool  swingSl   = slModeInput == "Last swing"
+    float swingRef  = newDir == 1 ? (slUseWickInput ? swingLowWick : swingLow) : (slUseWickInput ? swingHighWick : swingHigh)
+    float swingStop = swingSl ? swingRef - newDir * slBufferTicksInput * syminfo.mintick : na
+    bool  stopValid = not swingSl or (not na(swingStop) and (newDir == 1 ? swingStop < open : swingStop > open))
+    if newDir != 0 and stopValid and isFifteenMinute and historyReady and strategy.opentrades == 0
         while setups.size() >= maxActiveSetupsInput
             retireSetup(setups.get(0), bar_index)   // oldest first
             setups.remove(0)
@@ -327,7 +357,7 @@ if barstate.isconfirmed
         int    expiry     = bar_index + setupValidityBarsInput
         line   lvlLine    = showPendingLevelsInput ? line.new(bar_index, open, expiry, open, color = color.new(newDir == 1 ? TP_COLOR : SL_COLOR, 50), style = line.style_dotted, width = 1) : na
         setups.push(NoSetup.new(direction = newDir, level = open, noHigh = high, noLow = low, noRange = high - low,
-             creationBar = bar_index, expiryBar = expiry, orderId = newOrderId, seq = setupSeq, levelLine = lvlLine))
+             creationBar = bar_index, expiryBar = expiry, stopPrice = swingStop, orderId = newOrderId, seq = setupSeq, levelLine = lvlLine))
         // Resting limit at the level. process_orders_on_close = false, so the earliest possible fill is candle #1.
         strategy.entry(newOrderId, newDir == 1 ? strategy.long : strategy.short, limit = open, comment = newOrderId)
         newLongSetup  := newDir == 1
