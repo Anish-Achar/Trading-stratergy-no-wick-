@@ -45,7 +45,7 @@
 //  • If the trend flips and the level is touched in the same bar, OHLC cannot tell
 //    which came first. The fill stands; that bar's close is not used to unwind it.
 //  • If one bar crosses both SL and TP, the broker emulator decides which fills.
-//  • Drawing limits: only the most recent ~250 trades keep their TP/SL lines/tags.
+//  • Drawing limits: only the most recent ~250 trades keep their TP/SL zones/tags.
 // ============================================================================
 strategy("NO Candle Strategy", shorttitle = "NO Candle", overlay = true,
      default_qty_type        = strategy.percent_of_equity,
@@ -59,13 +59,21 @@ strategy("NO Candle Strategy", shorttitle = "NO Candle", overlay = true,
      calc_on_order_fills     = true,
      use_bar_magnifier       = true,
      max_lines_count         = 500,
-     max_labels_count        = 500)
+     max_labels_count        = 500,
+     max_boxes_count         = 500,
+     behind_chart            = false)   // draw markers, zones and text in front of the candles
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const color TP_COLOR  = #00E676   // vivid green: longs, TP
-const color SL_COLOR  = #FF1744   // vivid red: shorts, SL
-const color EMA_COLOR = #FF9800
-const color STRUCT_COLOR = #90A4AE   // muted: swing markers and levels
+// One palette, matching TradingView's Long/Short Position tool.
+const color TP_COLOR         = #089981   // green: longs, TP zone
+const color SL_COLOR         = #F23645   // red: shorts, SL zone
+const color ENTRY_LINE_COLOR = #B2B5BE   // light grey entry line between the zones
+const color EMA_COLOR        = #FF9800
+const color STRUCT_COLOR     = #90A4AE   // muted: swing markers and levels
+
+const int ZONE_OPEN_TRANSP = 80   // zones while the trade is open
+const int ZONE_HIT_TRANSP  = 72   // closed trade: the side that was hit
+const int ZONE_MISS_TRANSP = 88   // closed trade: the other side
 
 const string GRP_TREND = "Trend"
 const string GRP_NO    = "NO Candle"
@@ -103,9 +111,9 @@ bool  showEmaInput            = input.bool(true,  "Show EMA", group = GRP_VIS)
 bool  showStructureInput      = input.bool(true,  "Show swings (HH/LH/HL/LL)", group = GRP_VIS)
 bool  showNoCandlesInput      = input.bool(true,  "Show NO candle markers", group = GRP_VIS)
 bool  showPendingLevelsInput  = input.bool(false, "Show pending levels", group = GRP_VIS)
-bool  showActiveSlTpInput     = input.bool(true,  "Show active SL/TP", group = GRP_VIS)
+bool  showActiveSlTpInput     = input.bool(true,  "Show TP/SL zones while trade is open", group = GRP_VIS)
 bool  showTradeCirclesInput   = input.bool(true,  "Show entry circles", group = GRP_VIS)
-bool  showTradeLinesInput     = input.bool(true,  "Show TP/SL lines", group = GRP_VIS)
+bool  showTradeLinesInput     = input.bool(true,  "Show TP/SL zones on closed trades", group = GRP_VIS)
 bool  showTradeLabelsInput    = input.bool(true,  "Show TP/SL tags", group = GRP_VIS)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -129,8 +137,9 @@ type ActiveTrade
     float  level
     float  slPrice
     float  tpPrice
-    line   slLine
-    line   tpLine
+    box    tpBox
+    box    slBox
+    line   entryLine
 
 // Entry circle position. Survives the flat reset, so a trade that opens and closes on the same bar still gets its circle.
 type EntryMark
@@ -158,6 +167,14 @@ retireSetup(NoSetup s, int endBar) =>
     strategy.cancel(s.orderId)
     if not na(s.levelLine)
         line.set_x2(s.levelLine, endBar)
+
+// Draws the position-tool zones: TP box and SL box meeting at a grey entry line.
+drawZones(ActiveTrade t, int leftBar, int rightBar, float entryPx) =>
+    t.tpBox := box.new(leftBar, math.max(entryPx, t.tpPrice), rightBar, math.min(entryPx, t.tpPrice),
+         border_color = color.new(TP_COLOR, 100), bgcolor = color.new(TP_COLOR, ZONE_OPEN_TRANSP))
+    t.slBox := box.new(leftBar, math.max(entryPx, t.slPrice), rightBar, math.min(entryPx, t.slPrice),
+         border_color = color.new(SL_COLOR, 100), bgcolor = color.new(SL_COLOR, ZONE_OPEN_TRANSP))
+    t.entryLine := line.new(leftBar, entryPx, rightBar, entryPx, color = ENTRY_LINE_COLOR, width = 1)
 
 // Processes a fill: freezes SL/TP from the ACTUAL fill price, cancels every other pending
 // setup (first touch wins) and records the entry circle. Returns the entry alert text,
@@ -193,8 +210,7 @@ processFill(ActiveTrade t, EntryMark m, array<NoSetup> pending, string fillId, f
     m.price     := fillPrice
     m.direction := dir
     if isOpen and showActiveSlTpInput and not na(risk)
-        t.slLine := line.new(fillBar, t.slPrice, bar_index, t.slPrice, color = color.new(SL_COLOR, 30), style = line.style_dashed, width = 1)
-        t.tpLine := line.new(fillBar, t.tpPrice, bar_index, t.tpPrice, color = color.new(TP_COLOR, 30), style = line.style_dashed, width = 1)
+        drawZones(t, fillBar, bar_index, fillPrice)
     if gappedPastStop
         strategy.close(fillId, comment = "Gap past SL")
     else if na(risk)
@@ -280,7 +296,7 @@ bool  openIsHigh    = wickToleranceTicksInput == 0 ? open == high : high - open 
 bool  isBullNo      = close > open and openIsLow
 bool  isBearNo      = close < open and openIsHigh
 
-// ─── 1. Closed trade: draw TP/SL lines, then reset (not gated by isconfirmed) ─
+// ─── 1. Closed trade: finalize TP/SL zones, then reset (not gated by isconfirmed)
 if strategy.closedtrades > lastClosedCount
     int    ci        = strategy.closedtrades - 1
     string closedId  = strategy.closedtrades.entry_id(ci)
@@ -295,21 +311,30 @@ if strategy.closedtrades > lastClosedCount
         if closedEntryMsg != "" and lastEntryAlertId != closedId
             lastEntryAlertId := closedId
             alert(closedEntryMsg, alert.freq_all)
-    line.delete(trade.slLine)
-    line.delete(trade.tpLine)
-    if not na(trade.slPrice)
-        if showTradeLinesInput
-            line.new(entryBi, trade.tpPrice, exitBi, trade.tpPrice, color = TP_COLOR, width = 2)
-            line.new(entryBi, trade.slPrice, exitBi, trade.slPrice, color = SL_COLOR, width = 2)
-        if showTradeLabelsInput
-            label.new(exitBi, trade.tpPrice, "TP", style = label.style_label_left, color = color.new(TP_COLOR, 100), textcolor = TP_COLOR, size = size.tiny)
-            label.new(exitBi, trade.slPrice, "SL", style = label.style_label_left, color = color.new(SL_COLOR, 100), textcolor = SL_COLOR, size = size.tiny)
+    bool hitTp   = (exitPx - entryPx) * closedDir > 0
+    int  rightBi = math.max(exitBi, entryBi + 1)   // same-candle trades still get a visible, one-bar box
+    if not na(trade.slPrice) and showTradeLinesInput
+        if na(trade.tpBox)
+            drawZones(trade, entryBi, rightBi, entryPx)
+        else
+            box.set_right(trade.tpBox, rightBi)
+            box.set_right(trade.slBox, rightBi)
+            line.set_x2(trade.entryLine, rightBi)
+        // Highlight the side that was hit; fade the other.
+        box.set_bgcolor(trade.tpBox, color.new(TP_COLOR, hitTp ? ZONE_HIT_TRANSP : ZONE_MISS_TRANSP))
+        box.set_bgcolor(trade.slBox, color.new(SL_COLOR, hitTp ? ZONE_MISS_TRANSP : ZONE_HIT_TRANSP))
+    else
+        box.delete(trade.tpBox)
+        box.delete(trade.slBox)
+        line.delete(trade.entryLine)
+    if not na(trade.slPrice) and showTradeLabelsInput
+        label.new(rightBi, trade.tpPrice, "TP", style = label.style_label_left, color = color.new(TP_COLOR, 100), textcolor = TP_COLOR, size = size.tiny)
+        label.new(rightBi, trade.slPrice, "SL", style = label.style_label_left, color = color.new(SL_COLOR, 100), textcolor = SL_COLOR, size = size.tiny)
     if lastExitAlertId != closedId
         lastExitAlertId := closedId
-        string exitReason = (exitPx - entryPx) * closedDir > 0 ? "TP" : "SL"
-        alert("NO Candle " + directionText(closedDir) + " exit (" + exitReason + ") | " + symbolText() +
+        alert("NO Candle " + directionText(closedDir) + " exit (" + (hitTp ? "TP" : "SL") + ") | " + symbolText() +
              " | exit " + str.tostring(exitPx, format.mintick), alert.freq_all)
-    // Flat-state reset, only after the lines above have used the stored SL/TP.
+    // Flat-state reset, only after the zones above have used the stored SL/TP.
     trade           := ActiveTrade.new()
     lastClosedCount := strategy.closedtrades
 
@@ -326,9 +351,11 @@ if strategy.opentrades > 0
     if not na(trade.slPrice)
         strategy.exit("Exit " + trade.entryId, from_entry = trade.entryId, stop = trade.slPrice, limit = trade.tpPrice,
              comment_loss = "SL", comment_profit = "TP")
-        if not na(trade.slLine)
-            line.set_x2(trade.slLine, bar_index)
-            line.set_x2(trade.tpLine, bar_index)
+        // Open-trade zones grow with each candle until the exit.
+        if not na(trade.tpBox)
+            box.set_right(trade.tpBox, bar_index)
+            box.set_right(trade.slBox, bar_index)
+            line.set_x2(trade.entryLine, bar_index)
 
 // ─── 3. Setup management: confirmed candles only ─────────────────────────────
 bool newLongSetup  = false
@@ -364,7 +391,7 @@ if barstate.isconfirmed
         newShortSetup := newDir == -1
 
 // ─── Visuals ─────────────────────────────────────────────────────────────────
-plot(showEmaInput ? emaValue : na, "EMA", color = EMA_COLOR, linewidth = 1)
+plot(showEmaInput ? emaValue : na, "EMA", color = color.new(EMA_COLOR, 30), linewidth = 1)
 
 // Swings are drawn back on the pivot candle itself; they appear once confirmed (pivot length bars later).
 plotshape(showStructureInput and markHH ? pivotHi : na, "Swing HH", shape.diamond, location.absolute, STRUCT_COLOR, offset = -pivotLengthInput, text = "HH", textcolor = STRUCT_COLOR, size = size.tiny, display = display.pane)
