@@ -1,0 +1,282 @@
+//@version=6
+// ============================================================================
+//  NO Candle Strategy (15-minute chart)
+// ============================================================================
+//  Rules
+//  • Trend: close vs EMA(200) on the chart's own bars. close == EMA = no bias.
+//  • Bullish NO candle: close > open and open == low. Bearish: close < open and
+//    open == high. Wick tolerance > 0 lets the open sit up to N ticks from the
+//    low/high. Dojis and zero-range candles never qualify (close must differ from open).
+//  • Only trend-aligned NO candles create a setup. Level = the NO candle's open.
+//  • When the NO candle (candle #0) closes, a resting limit order is placed at the
+//    level. With process_orders_on_close = false it can fill on candles #1–#9
+//    (a wick touch is enough). It is cancelled when candle #9 closes.
+//  • If a confirmed candle closes against the setup's trend (or exactly on the EMA),
+//    the setup is cancelled at that close.
+//  • Up to N pending setups. When full, the oldest is evicted. The first fill
+//    cancels all others.
+//  • One position at a time. NO candles are ignored while a trade is open.
+//  • Risk = NO range × SL multiplier. SL = fill ∓ risk, TP = fill ± risk × RR,
+//    measured from the ACTUAL fill price.
+//
+//  Execution notes
+//  • Setup creation, expiry and trend invalidation run only on barstate.isconfirmed,
+//    so calc_on_order_fills cannot leak a bar's final close into mid-bar executions.
+//  • Fill handling is NOT gated by isconfirmed. It is idempotent (keyed on the
+//    entry id), so repeated executions on the same bar (after fills or realtime
+//    ticks) cannot duplicate SL/TP, cancellations or drawings. Alerts use varip
+//    guards so each fires once.
+//
+//  Known limitations (by design; no lookahead is used to "fix" these)
+//  • If one bar crosses several pending levels, TradingView's broker emulator picks
+//    the fill. The script still guarantees only one trade.
+//  • If the trend flips and the level is touched in the same bar, OHLC cannot tell
+//    which came first. The fill stands; that bar's close is not used to unwind it.
+//  • If one bar crosses both SL and TP, the broker emulator decides which fills.
+//  • Drawing limits: only the most recent ~250 trades keep their TP/SL lines/tags.
+// ============================================================================
+strategy("NO Candle Strategy", shorttitle = "NO Candle", overlay = true,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 10,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     slippage                = 2,
+     pyramiding              = 0,
+     process_orders_on_close = false,
+     calc_on_every_tick      = true,
+     calc_on_order_fills     = true,
+     use_bar_magnifier       = true,
+     max_lines_count         = 500,
+     max_labels_count        = 500)
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const color TP_COLOR  = #00E676   // vivid green: longs, TP
+const color SL_COLOR  = #FF1744   // vivid red: shorts, SL
+const color EMA_COLOR = #FF9800
+
+const string GRP_TREND = "Trend"
+const string GRP_NO    = "NO Candle"
+const string GRP_RISK  = "Risk"
+const string GRP_DIR   = "Directional"
+const string GRP_VIS   = "Visualization"
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+int   emaLengthInput          = input.int(200, "EMA length", minval = 1, group = GRP_TREND)
+
+int   setupValidityBarsInput  = input.int(9, "Setup validity (candles)", minval = 1, maxval = 100, group = GRP_NO,
+     tooltip = "The NO candle is candle #0. Its level may be touched on candles #1 to #N. The setup expires when candle #N closes.")
+int   maxActiveSetupsInput    = input.int(3, "Max pending setups", minval = 1, group = GRP_NO,
+     tooltip = "When full, the oldest pending setup is removed to make room for the newest.")
+int   wickToleranceTicksInput = input.int(0, "Wick tolerance (ticks)", minval = 0, group = GRP_NO,
+     tooltip = "0 = exact: open must equal the low (bullish) or the high (bearish).")
+
+float riskMultiplierInput     = input.float(2.0, "SL multiplier (× NO candle range)", minval = 0.01, step = 0.1, group = GRP_RISK)
+float rrRatioInput            = input.float(1.0, "Reward:risk ratio", minval = 0.01, step = 0.1, group = GRP_RISK)
+
+bool  enableLongsInput        = input.bool(true, "Enable longs", group = GRP_DIR)
+bool  enableShortsInput       = input.bool(true, "Enable shorts", group = GRP_DIR)
+
+bool  showEmaInput            = input.bool(true,  "Show EMA", group = GRP_VIS)
+bool  showNoCandlesInput      = input.bool(true,  "Show NO candle markers", group = GRP_VIS)
+bool  showPendingLevelsInput  = input.bool(false, "Show pending levels", group = GRP_VIS)
+bool  showActiveSlTpInput     = input.bool(true,  "Show active SL/TP", group = GRP_VIS)
+bool  showTradeCirclesInput   = input.bool(true,  "Show entry circles", group = GRP_VIS)
+bool  showTradeLinesInput     = input.bool(true,  "Show TP/SL lines", group = GRP_VIS)
+bool  showTradeLabelsInput    = input.bool(true,  "Show TP/SL tags", group = GRP_VIS)
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+// A pending NO candle setup. noHigh/noLow/noRange are frozen at creation and never recalculated.
+type NoSetup
+    int    direction    // 1 = long, -1 = short
+    float  level        // NO candle open = resting limit price
+    float  noHigh
+    float  noLow
+    float  noRange      // noHigh - noLow
+    int    creationBar  // candle #0
+    int    expiryBar    // last candle allowed to touch; the order is cancelled when it closes
+    string orderId
+    int    seq
+    line   levelLine
+
+// The open trade's frozen bracket. Replaced with a fresh object when the trade closes.
+type ActiveTrade
+    string entryId = ""
+    float  level
+    float  slPrice
+    float  tpPrice
+    line   slLine
+    line   tpLine
+
+// Entry circle position. Survives the flat reset, so a trade that opens and closes on the same bar still gets its circle.
+type EntryMark
+    int   barIndex  = -1
+    float price
+    int   direction = 0
+
+// ─── Functions ───────────────────────────────────────────────────────────────
+symbolText() =>
+    syminfo.prefix + ":" + syminfo.ticker
+
+directionText(int dir) =>
+    dir == 1 ? "LONG" : "SHORT"
+
+// Cancels a setup's resting order and ends its level line at endBar.
+retireSetup(NoSetup s, int endBar) =>
+    strategy.cancel(s.orderId)
+    if not na(s.levelLine)
+        line.set_x2(s.levelLine, endBar)
+
+// Processes a fill: freezes SL/TP from the ACTUAL fill price, cancels every other pending
+// setup (first touch wins) and records the entry circle. Returns the entry alert text,
+// or "" if no stored setup matches the fill.
+processFill(ActiveTrade t, EntryMark m, array<NoSetup> pending, string fillId, float fillPrice, int fillBar, int dir, bool isOpen) =>
+    int idx = -1
+    for [i, s] in pending
+        if s.orderId == fillId
+            idx := i
+            break
+    float risk  = na
+    float level = na
+    if idx >= 0
+        NoSetup filled = pending.get(idx)
+        risk  := filled.noRange * riskMultiplierInput
+        level := filled.level
+    t.entryId := fillId
+    t.level   := level
+    t.slPrice := fillPrice - dir * risk
+    t.tpPrice := fillPrice + dir * risk * rrRatioInput
+    for [i, s] in pending
+        if i == idx
+            if not na(s.levelLine)
+                line.set_x2(s.levelLine, fillBar)
+        else
+            retireSetup(s, bar_index)
+    pending.clear()
+    m.barIndex  := fillBar
+    m.price     := fillPrice
+    m.direction := dir
+    if isOpen and showActiveSlTpInput and not na(risk)
+        t.slLine := line.new(fillBar, t.slPrice, bar_index, t.slPrice, color = color.new(SL_COLOR, 30), style = line.style_dashed, width = 1)
+        t.tpLine := line.new(fillBar, t.tpPrice, bar_index, t.tpPrice, color = color.new(TP_COLOR, 30), style = line.style_dashed, width = 1)
+    if na(risk)
+        // Unreachable by design (every entry id belongs to a stored setup), but never hold a position without a stop.
+        log.error("NO Candle: no stored setup for fill {0}; closing the position.", fillId)
+        strategy.close(fillId, comment = "No setup data")
+    string msg = na(risk) ? "" : "NO Candle " + directionText(dir) + " entry | " + symbolText() +
+         " | level " + str.tostring(t.level, format.mintick) +
+         " | fill " + str.tostring(fillPrice, format.mintick) +
+         " | SL " + str.tostring(t.slPrice, format.mintick) +
+         " | TP " + str.tostring(t.tpPrice, format.mintick)
+    msg
+
+// ─── State ───────────────────────────────────────────────────────────────────
+var array<NoSetup> setups          = array.new<NoSetup>()
+var int            setupSeq        = 0
+var ActiveTrade    trade           = ActiveTrade.new()
+var EntryMark      entryMark       = EntryMark.new()
+var int            lastClosedCount = 0
+// varip: each alert must fire once even though `var` state rolls back on every realtime tick.
+varip string lastEntryAlertId = ""
+varip string lastExitAlertId  = ""
+
+// ─── Trend and NO candle detection ───────────────────────────────────────────
+bool  isFifteenMinute = timeframe.period == "15"
+float emaValue        = ta.ema(close, emaLengthInput)
+int   trendDir        = close > emaValue ? 1 : close < emaValue ? -1 : 0
+bool  historyReady    = bar_index > emaLengthInput and not na(emaValue)
+
+// Tolerance 0 = exact equality. Otherwise a tiny epsilon absorbs float noise in the tick distance.
+float wickTolerance = wickToleranceTicksInput * syminfo.mintick + syminfo.mintick * 1e-6
+bool  openIsLow     = wickToleranceTicksInput == 0 ? open == low  : open - low  <= wickTolerance
+bool  openIsHigh    = wickToleranceTicksInput == 0 ? open == high : high - open <= wickTolerance
+bool  isBullNo      = close > open and openIsLow
+bool  isBearNo      = close < open and openIsHigh
+
+// ─── 1. Closed trade: draw TP/SL lines, then reset (not gated by isconfirmed) ─
+if strategy.closedtrades > lastClosedCount
+    int    ci        = strategy.closedtrades - 1
+    string closedId  = strategy.closedtrades.entry_id(ci)
+    int    closedDir = strategy.closedtrades.size(ci) > 0 ? 1 : -1
+    int    entryBi   = strategy.closedtrades.entry_bar_index(ci)
+    int    exitBi    = strategy.closedtrades.exit_bar_index(ci)
+    float  entryPx   = strategy.closedtrades.entry_price(ci)
+    float  exitPx    = strategy.closedtrades.exit_price(ci)
+    // The trade opened and closed before this bar's committed state saw it open: process its fill first.
+    if closedId != trade.entryId
+        string closedEntryMsg = processFill(trade, entryMark, setups, closedId, entryPx, entryBi, closedDir, false)
+        if closedEntryMsg != "" and lastEntryAlertId != closedId
+            lastEntryAlertId := closedId
+            alert(closedEntryMsg, alert.freq_all)
+    line.delete(trade.slLine)
+    line.delete(trade.tpLine)
+    if not na(trade.slPrice)
+        if showTradeLinesInput
+            line.new(entryBi, trade.tpPrice, exitBi, trade.tpPrice, color = TP_COLOR, width = 2)
+            line.new(entryBi, trade.slPrice, exitBi, trade.slPrice, color = SL_COLOR, width = 2)
+        if showTradeLabelsInput
+            label.new(exitBi, trade.tpPrice, "TP", style = label.style_label_left, color = color.new(TP_COLOR, 100), textcolor = TP_COLOR, size = size.tiny)
+            label.new(exitBi, trade.slPrice, "SL", style = label.style_label_left, color = color.new(SL_COLOR, 100), textcolor = SL_COLOR, size = size.tiny)
+    if lastExitAlertId != closedId
+        lastExitAlertId := closedId
+        string exitReason = (exitPx - entryPx) * closedDir > 0 ? "TP" : "SL"
+        alert("NO Candle " + directionText(closedDir) + " exit (" + exitReason + ") | " + symbolText() +
+             " | exit " + str.tostring(exitPx, format.mintick), alert.freq_all)
+    // Flat-state reset, only after the lines above have used the stored SL/TP.
+    trade           := ActiveTrade.new()
+    lastClosedCount := strategy.closedtrades
+
+// ─── 2. Open trade: process a new fill once, keep the bracket in place ───────
+if strategy.opentrades > 0
+    string openId = strategy.opentrades.entry_id(0)
+    if openId != trade.entryId
+        int    openDir      = strategy.opentrades.size(0) > 0 ? 1 : -1
+        string openEntryMsg = processFill(trade, entryMark, setups, openId, strategy.opentrades.entry_price(0),
+             strategy.opentrades.entry_bar_index(0), openDir, true)
+        if openEntryMsg != "" and lastEntryAlertId != openId
+            lastEntryAlertId := openId
+            alert(openEntryMsg, alert.freq_all)
+    if not na(trade.slPrice)
+        strategy.exit("Exit " + trade.entryId, from_entry = trade.entryId, stop = trade.slPrice, limit = trade.tpPrice,
+             comment_loss = "SL", comment_profit = "TP")
+        if not na(trade.slLine)
+            line.set_x2(trade.slLine, bar_index)
+            line.set_x2(trade.tpLine, bar_index)
+
+// ─── 3. Setup management: confirmed candles only ─────────────────────────────
+bool newLongSetup  = false
+bool newShortSetup = false
+if barstate.isconfirmed
+    // Expire once the last valid candle has closed; cancel if this candle closed against (or exactly on) the EMA.
+    if setups.size() > 0
+        for i = setups.size() - 1 to 0
+            NoSetup s = setups.get(i)
+            if bar_index >= s.expiryBar or trendDir != s.direction
+                retireSetup(s, bar_index)
+                setups.remove(i)
+    int newDir = isBullNo and trendDir == 1 and enableLongsInput ? 1 : isBearNo and trendDir == -1 and enableShortsInput ? -1 : 0
+    if newDir != 0 and isFifteenMinute and historyReady and strategy.opentrades == 0
+        while setups.size() >= maxActiveSetupsInput
+            retireSetup(setups.get(0), bar_index)   // oldest first
+            setups.remove(0)
+        setupSeq += 1
+        string newOrderId = (newDir == 1 ? "NO L" : "NO S") + str.tostring(setupSeq)
+        int    expiry     = bar_index + setupValidityBarsInput
+        line   lvlLine    = showPendingLevelsInput ? line.new(bar_index, open, expiry, open, color = color.new(newDir == 1 ? TP_COLOR : SL_COLOR, 50), style = line.style_dotted, width = 1) : na
+        setups.push(NoSetup.new(direction = newDir, level = open, noHigh = high, noLow = low, noRange = high - low,
+             creationBar = bar_index, expiryBar = expiry, orderId = newOrderId, seq = setupSeq, levelLine = lvlLine))
+        // Resting limit at the level. process_orders_on_close = false, so the earliest possible fill is candle #1.
+        strategy.entry(newOrderId, newDir == 1 ? strategy.long : strategy.short, limit = open, comment = newOrderId)
+        newLongSetup  := newDir == 1
+        newShortSetup := newDir == -1
+
+// ─── Visuals ─────────────────────────────────────────────────────────────────
+plot(showEmaInput ? emaValue : na, "EMA", color = EMA_COLOR, linewidth = 1)
+plotshape(showNoCandlesInput and newLongSetup,  "Bullish NO candle", shape.triangleup,   location.belowbar, TP_COLOR, size = size.tiny, display = display.pane)
+plotshape(showNoCandlesInput and newShortSetup, "Bearish NO candle", shape.triangledown, location.abovebar, SL_COLOR, size = size.tiny, display = display.pane)
+plotshape(showTradeCirclesInput and entryMark.barIndex == bar_index ? entryMark.price : na, "Entry", shape.circle, location.absolute,
+     entryMark.direction == 1 ? TP_COLOR : SL_COLOR, size = size.tiny, display = display.pane)
+
+if barstate.islast and not isFifteenMinute
+    var table tfWarning = table.new(position.top_right, 1, 1)
+    table.cell(tfWarning, 0, 0, "NO Candle runs on the 15m chart only. No setups on this timeframe.",
+         text_color = color.white, bgcolor = color.new(color.orange, 15), text_size = size.small)
