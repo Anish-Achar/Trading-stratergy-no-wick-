@@ -21,7 +21,9 @@
 //  • If, after a confirmed candle closes, the trend mode no longer allows the setup's
 //    direction, the setup is cancelled at that close.
 //  • Up to N pending setups. When full, the oldest is evicted. The first fill
-//    cancels all others.
+//    cancels all others: pending entries share an OCA-cancel group, so the broker
+//    emulator cancels them the instant one fills (before any later touch can fill).
+//  • Commission defaults to 0 (edit in Settings → Properties). Slippage: 2 ticks.
 //  • One position at a time. NO candles are ignored while a trade is open.
 //  • Stop loss (input "Stop loss"):
 //    – "Last swing" (default): below the most recent confirmed swing low (longs) or above
@@ -51,7 +53,7 @@ strategy("NO Candle Strategy", shorttitle = "NO Candle", overlay = true,
      default_qty_type        = strategy.percent_of_equity,
      default_qty_value       = 10,
      commission_type         = strategy.commission.percent,
-     commission_value        = 0.05,
+     commission_value        = 0,
      slippage                = 2,
      pyramiding              = 0,
      process_orders_on_close = false,
@@ -386,7 +388,10 @@ if barstate.isconfirmed
         setups.push(NoSetup.new(direction = newDir, level = open, noHigh = high, noLow = low, noRange = high - low,
              creationBar = bar_index, expiryBar = expiry, stopPrice = swingStop, orderId = newOrderId, seq = setupSeq, levelLine = lvlLine))
         // Resting limit at the level. process_orders_on_close = false, so the earliest possible fill is candle #1.
-        strategy.entry(newOrderId, newDir == 1 ? strategy.long : strategy.short, limit = open, comment = newOrderId)
+        // All pending setups were created since the last trade, so they share this OCA group: the first fill cancels
+        // the rest at broker level, even when a trade opens and closes inside one candle.
+        strategy.entry(newOrderId, newDir == 1 ? strategy.long : strategy.short, limit = open, comment = newOrderId,
+             oca_name = "NO-OCA-" + str.tostring(strategy.closedtrades), oca_type = strategy.oca.cancel)
         newLongSetup  := newDir == 1
         newShortSetup := newDir == -1
 
