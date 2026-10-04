@@ -1,0 +1,1045 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Study Mosaic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=Martian+Mono:wdth,wght@75..112.5,300..700&display=swap">
+<style>
+  /* Layout: a full-bleed canvas fills with squares behind a centred time plate.
+     Brand + mode sit along the top, subjects + settings in a glass dock at the bottom.
+     Full screen drops everything except the squares and an enlarged plate. */
+  :root {
+    --ink: #0c0d12;
+    --glass: rgba(15, 16, 23, 0.8);
+    --line: rgba(232, 234, 245, 0.1);
+    --line-strong: rgba(232, 234, 245, 0.22);
+    --text: #eceef6;
+    --muted: #9599ad;
+    --danger: #ff7a85;
+    --subj: hsl(357, 78%, 61%);
+    --subj-soft: hsla(357, 78%, 61%, 0.1);
+    --subj-line: hsla(357, 78%, 61%, 0.35);
+    --plate: hsla(357, 30%, 8%, 0.8);
+    --on-subj: #0c0d12;
+    --font-ui: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-num: "Martian Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: radial-gradient(1100px 680px at 50% 45%, var(--subj-soft), transparent 70%), var(--ink);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.4;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; }
+
+  #tiles { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    height: 100%;
+    overflow-y: auto;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 16px;
+    padding-block: 16px;
+    padding-inline: 16px;
+  }
+
+  /* Top bar */
+  .topbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-radius: 12px;
+    background: var(--glass); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    font: 600 12px/1 var(--font-num); letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .mark { display: grid; grid-template-columns: repeat(2, 6px); gap: 2px; }
+  .mark i { width: 6px; height: 6px; border-radius: 1.5px; background: var(--line-strong); }
+  .mark i:nth-child(1), .mark i:nth-child(4) { background: var(--subj); }
+  .mode-wrap { position: relative; }
+  .confirm {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 5;
+    width: min(340px, calc(100vw - 32px)); box-sizing: border-box;
+    display: grid; gap: 10px; padding: 14px;
+    border-radius: 14px; background: var(--glass); border: 1px solid var(--line-strong);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    font-size: 14px;
+  }
+  .confirm-actions { display: flex; gap: 8px; }
+
+  /* Segmented controls */
+  .seg {
+    display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px;
+    background: var(--glass); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .seg button {
+    border: 0; background: transparent; color: var(--muted);
+    font: 600 13px/1 var(--font-ui); padding: 10px 15px; border-radius: 9px; cursor: pointer;
+  }
+  .seg button:hover:not(:disabled) { color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--text); color: var(--ink); }
+  .seg-small { background: rgba(255, 255, 255, 0.03); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .seg-small button { padding: 8px 11px; font-size: 12.5px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font: 600 14px/1 var(--font-ui); padding: 12px 18px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--text);
+    cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+  .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+  .btn-primary { min-width: 132px; background: var(--subj); border-color: transparent; color: var(--on-subj); }
+  .btn-primary:hover:not(:disabled) { background: var(--subj); filter: brightness(1.08); }
+  .btn-small { padding: 8px 12px; font-size: 13px; border-radius: 9px; }
+  .btn.armed { border-color: var(--danger); color: var(--danger); }
+  :focus-visible { outline: 2px solid var(--subj); outline-offset: 2px; }
+
+  /* Time plate */
+  .stage { display: grid; place-items: center; min-height: 0; }
+  .plate {
+    display: grid; justify-items: center; gap: 14px;
+    max-width: 100%; box-sizing: border-box;
+    padding: 22px clamp(18px, 4vw, 34px) 24px;
+    border-radius: 24px;
+    background: var(--plate);
+    border: 1px solid var(--subj-line);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow: 0 30px 90px -30px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .plate-head {
+    display: flex; align-items: center; gap: 10px;
+    font: 600 12px/1 var(--font-num); letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .dot { width: 0.85em; height: 0.85em; border-radius: 0.25em; background: var(--subj); box-shadow: 0 0 14px var(--subj); }
+  .status {
+    color: var(--muted); padding: 0.45em 0.7em; border: 1px solid var(--line); border-radius: 0.5em;
+    font-size: 0.82em; letter-spacing: 0.14em;
+  }
+  .digits {
+    font-family: var(--font-num); font-weight: 500; font-stretch: 87.5%;
+    font-variant-numeric: tabular-nums; font-size: clamp(48px, 10vw, 124px);
+    line-height: 1; letter-spacing: -0.03em; white-space: nowrap;
+  }
+  .digits .c { color: var(--muted); opacity: 0.75; }
+  .meter { width: 100%; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0%; background: var(--subj); }
+  .meta { font: 400 12px/1.4 var(--font-num); color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+  .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+  /* Dock */
+  .dock {
+    justify-self: center; width: 100%; max-width: 1060px; box-sizing: border-box;
+    display: grid; gap: 14px; padding: 14px; border-radius: 20px;
+    background: var(--glass); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(16px) saturate(1.1); backdrop-filter: blur(16px) saturate(1.1);
+  }
+  .subjects { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .subject {
+    --c: #888;
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--text);
+    cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s;
+  }
+  .subject:hover { background: rgba(255, 255, 255, 0.07); }
+  .subject .sw { flex: none; width: 16px; height: 16px; border-radius: 4px; background: var(--c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+  .subject .txt { display: grid; gap: 5px; min-width: 0; }
+  .subject .name { font-weight: 600; font-size: 14px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subject .today { font: 400 11px/1 var(--font-num); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .subject[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .subject[aria-pressed="true"] .sw { box-shadow: 0 0 12px var(--c), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+
+  .settings { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+  .label { font: 600 10.5px/1 var(--font-num); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font: 500 12px/1 var(--font-num); padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer;
+  }
+  .chip:hover:not(:disabled) { border-color: var(--line-strong); }
+  .chip[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--ink); }
+  .chip:disabled, .seg button:disabled, .custom input:disabled { opacity: 0.4; cursor: not-allowed; }
+  .custom { display: inline-flex; align-items: center; gap: 4px; font: 500 12px/1 var(--font-num); color: var(--muted); }
+  .custom input {
+    width: 3.2em; padding: 7px 4px; border-radius: 8px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04); color: var(--text);
+    font: 500 13px/1 var(--font-num); text-align: center;
+  }
+  .note { font-size: 12px; color: var(--muted); }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .toggle input { accent-color: var(--subj); width: 16px; height: 16px; margin: 0; }
+  .keys { margin: 0; font: 400 11px/1.4 var(--font-num); color: var(--muted); letter-spacing: 0.03em; }
+  .keys kbd { font: inherit; color: var(--text); padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; }
+
+  @media (max-width: 760px) {
+    .subjects { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 4px; }
+    .subject { flex: 0 0 auto; min-width: 140px; scroll-snap-align: start; }
+    .settings { gap: 12px 18px; }
+  }
+  @media (hover: none) { .keys { display: none; } }
+
+  /* Full screen (focus) mode */
+  body.focus .topbar, body.focus .dock, body.focus .actions, body.focus .meta { display: none; }
+  body.focus .app { grid-template-rows: 1fr; }
+  body.focus .plate {
+    gap: clamp(12px, 2.2vh, 26px);
+    padding: clamp(18px, 3.6vh, 46px) clamp(24px, 4.5vw, 76px);
+    border-radius: clamp(20px, 2.4vw, 38px);
+  }
+  body.focus .plate-head { font-size: clamp(12px, 1.3vw, 19px); }
+  body.focus .digits { font-size: min(17vw, 30vh); }
+  body.focus.idle, body.focus.idle * { cursor: none; }
+  .focus-ui {
+    position: fixed; z-index: 10;
+    top: calc(env(safe-area-inset-top, 0px) + 16px); right: 16px; left: 16px;
+    display: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+    pointer-events: none; opacity: 0; transition: opacity 0.3s;
+  }
+  .focus-ui .hint { font: 400 12px/1 var(--font-num); color: var(--muted); margin-right: 6px; }
+  .focus-ui .btn { background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  body.focus .focus-ui { display: flex; }
+  body.focus.show-ui .focus-ui { opacity: 1; pointer-events: auto; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+</style>
+
+<canvas id="tiles" aria-hidden="true"></canvas>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Study Mosaic</div>
+    <div class="mode-wrap">
+      <div class="seg" role="group" aria-label="Mode">
+        <button type="button" id="mode-timer" data-mode="timer">Timer</button>
+        <button type="button" id="mode-stopwatch" data-mode="stopwatch">Stopwatch</button>
+      </div>
+      <div class="confirm" id="mode-confirm" role="alertdialog" aria-labelledby="mode-confirm-text" hidden>
+        <span id="mode-confirm-text">Switch modes? This resets the current session.</span>
+        <div class="confirm-actions">
+          <button type="button" class="btn btn-small armed" id="mode-confirm-yes">Switch and reset</button>
+          <button type="button" class="btn btn-small" id="mode-confirm-no">Keep going</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="plate" aria-label="Study clock">
+      <div class="plate-head"><span class="dot" aria-hidden="true"></span><span id="plate-subject">Maths</span><span class="status" id="status">Ready</span></div>
+      <div class="digits" id="digits" role="timer" aria-live="off">1:00:00</div>
+      <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+      <div class="meta" id="meta">&nbsp;</div>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="start">Start</button>
+        <button type="button" class="btn" id="reset">Reset</button>
+        <button type="button" class="btn" id="fullscreen">Full screen</button>
+      </div>
+    </section>
+  </main>
+
+  <section class="dock" aria-label="Session settings">
+    <div class="subjects" id="subjects" role="group" aria-label="Subject"></div>
+    <div class="settings">
+      <div class="group">
+        <span class="label" id="duration-label">Duration</span>
+        <div class="chips" id="presets"></div>
+        <div class="custom">
+          <input id="dur-h" type="number" min="0" max="23" inputmode="numeric" aria-label="Hours"><span>h</span>
+          <input id="dur-m" type="number" min="0" max="59" inputmode="numeric" aria-label="Minutes"><span>m</span>
+        </div>
+        <span class="note" id="duration-note" hidden>Reset to change</span>
+      </div>
+      <div class="group">
+        <span class="label">Fill</span>
+        <div class="seg seg-small" id="patterns" role="group" aria-label="Fill pattern"></div>
+        <button type="button" class="btn btn-small" id="preview">Preview</button>
+      </div>
+      <div class="group">
+        <span class="label">Squares</span>
+        <div class="seg seg-small" id="sizes" role="group" aria-label="Square size"></div>
+      </div>
+      <label class="toggle" for="sound"><input type="checkbox" id="sound"><span>Chime when done</span></label>
+    </div>
+    <p class="keys"><kbd>Space</kbd> start / pause &nbsp;·&nbsp; <kbd>F</kbd> full screen &nbsp;·&nbsp; <kbd>Esc</kbd> exit full screen</p>
+  </section>
+</div>
+
+<div class="focus-ui" id="focus-ui">
+  <span class="hint">Esc or double-click to exit</span>
+  <button type="button" class="btn btn-small" id="focus-run">Pause</button>
+  <button type="button" class="btn btn-small" id="focus-exit">Exit full screen</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const SUBJECTS = [
+    { id: 'business',    name: 'Business',    h: 266, s: 80, l: 67 },
+    { id: 'economics',   name: 'Economics',   h: 148, s: 55, l: 48 },
+    { id: 'maths',       name: 'Maths',       h: 357, s: 78, l: 61 },
+    { id: 'cs',          name: 'CS',          h: 214, s: 88, l: 61 },
+    { id: 'programming', name: 'Programming', h: 46,  s: 95, l: 55 },
+  ];
+  const SUB = Object.fromEntries(SUBJECTS.map((s) => [s.id, s]));
+  const PRESETS = [[15, '15m'], [25, '25m'], [45, '45m'], [60, '1h'], [90, '1h 30m'], [120, '2h']];
+  const PATTERNS = [['scatter', 'Scatter'], ['rise', 'Rise'], ['sweep', 'Sweep'], ['bloom', 'Bloom']];
+  const SIZES = [['S', 'Small', 30], ['M', 'Medium', 46], ['L', 'Large', 74]];
+  const SHADES = [-9, -5, -2, 1, 4, 8];          // lightness offsets that give the mosaic its texture
+  const STORE = 'study-mosaic:v1';
+  const PREVIEW_MS = 9000, SHIMMER_MS = 2200, FADE_MS = 1400;
+  const reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const hsl = (h, s, l, a = 1) => `hsla(${h.toFixed(1)}, ${s}%, ${l}%, ${a})`;
+  const newSeed = () => (Math.random() * 4294967296) >>> 0;
+  const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+  function mulberry32(a) {
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- State ----------
+  function defaults() {
+    return {
+      mode: 'timer', subject: 'maths', durationMin: 60, pattern: 'scatter', size: 'M', sound: true,
+      running: false, acc: 0, runStart: 0, done: false, seed: newSeed(),
+      segments: [{ at: 0, subject: 'maths' }],
+      tally: { date: todayKey(), ms: {} }, tallyMark: 0,
+    };
+  }
+  function loadState() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (_) { saved = null; }
+    if (!saved || typeof saved !== 'object') return { s: defaults(), fresh: true };
+    const s = Object.assign(defaults(), saved);
+    if (!SUB[s.subject]) s.subject = 'maths';
+    if (s.mode !== 'timer' && s.mode !== 'stopwatch') s.mode = 'timer';
+    s.durationMin = clamp(Math.round(+s.durationMin) || 60, 1, 1439);
+    if (!PATTERNS.some((p) => p[0] === s.pattern)) s.pattern = 'scatter';
+    if (!SIZES.some((z) => z[0] === s.size)) s.size = 'M';
+    s.sound = s.sound !== false;
+    s.acc = Math.max(0, +s.acc || 0);
+    s.runStart = +s.runStart || 0;
+    s.running = !!s.running && s.runStart > 0;
+    s.done = !!s.done;
+    s.seed = (+s.seed >>> 0) || newSeed();
+    if (!Array.isArray(s.segments) || !s.segments.length ||
+        s.segments.some((g) => !g || !SUB[g.subject] || !(g.at >= 0))) {
+      s.segments = [{ at: 0, subject: s.subject }];
+    }
+    if (!s.tally || typeof s.tally !== 'object' || !s.tally.ms || typeof s.tally.ms !== 'object') {
+      s.tally = { date: todayKey(), ms: {} };
+    }
+    s.tallyMark = Math.max(0, +s.tallyMark || 0);
+    return { s, fresh: false };
+  }
+  const loaded = loadState();
+  const state = loaded.s;
+  function save() { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (_) { /* storage unavailable */ } }
+
+  const T = () => state.durationMin * 60000;
+  function elapsed(now = Date.now()) {
+    let e = state.acc + (state.running ? Math.max(0, now - state.runStart) : 0);
+    if (state.mode === 'timer') e = Math.min(e, T());
+    return e;
+  }
+  // Adds study time since the last call to today's total for the current subject.
+  function account() {
+    const d = todayKey();
+    if (state.tally.date !== d) state.tally = { date: d, ms: {} };
+    const e = elapsed();
+    const delta = e - state.tallyMark;
+    if (delta > 0) state.tally.ms[state.subject] = (state.tally.ms[state.subject] || 0) + delta;
+    state.tallyMark = e;
+  }
+  function subjectAt(t) {
+    const segs = state.segments;
+    let id = segs[0].subject;
+    for (let i = 1; i < segs.length; i++) { if (segs[i].at <= t) id = segs[i].subject; else break; }
+    return id;
+  }
+
+  // ---------- Canvas ----------
+  const canvas = $('tiles');
+  const ctx = canvas.getContext('2d');
+  const staticCanvas = document.createElement('canvas');
+  const sctx = staticCanvas.getContext('2d');
+  let prevCanvas = null;
+  let grid = { N: 0 };
+  let sprites = {}, ghost = null, white = null;
+  const drawn = { valid: false, cycle: 0, completed: 0, preview: false };
+  const fx = { preview: null, shimmer: null, fade: null };
+  let paintRequested = true;
+
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+  function makeTile(t, top, bottom, gloss, stroke) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = t;
+    const g = cv.getContext('2d');
+    const r = t * 0.2;
+    roundRect(g, 0, 0, t, t, r);
+    const fill = g.createLinearGradient(0, 0, 0, t);
+    fill.addColorStop(0, top);
+    fill.addColorStop(1, bottom);
+    g.fillStyle = fill;
+    g.fill();
+    const lw = Math.max(1, t * 0.035);
+    if (gloss || stroke) {
+      roundRect(g, lw / 2, lw / 2, t - lw, t - lw, Math.max(0, r - lw / 2));
+      if (gloss) {
+        const edge = g.createLinearGradient(0, 0, 0, t);
+        edge.addColorStop(0, 'rgba(255,255,255,0.38)');
+        edge.addColorStop(0.45, 'rgba(255,255,255,0)');
+        edge.addColorStop(1, 'rgba(0,0,0,0.14)');
+        g.strokeStyle = edge;
+      } else {
+        g.strokeStyle = stroke;
+      }
+      g.lineWidth = lw;
+      g.stroke();
+    }
+    return cv;
+  }
+  function buildSprites() {
+    const t = grid.tile;
+    sprites = {};
+    for (const s of SUBJECTS) {
+      sprites[s.id] = SHADES.map((dl, i) => {
+        const h = s.h + (i - (SHADES.length - 1) / 2) * 1.8;
+        const l = s.l + dl;
+        return makeTile(t, hsl(h, s.s, Math.min(86, l + 7)), hsl(h, Math.min(100, s.s + 6), Math.max(14, l - 6)), true);
+      });
+    }
+    ghost = makeTile(t, 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0.02)', false, 'rgba(255,255,255,0.05)');
+    white = makeTile(t, '#ffffff', '#ffffff', false);
+  }
+  function computeOrder(cols, rows) {
+    const N = cols * rows;
+    const rnd = mulberry32(state.seed);
+    const keys = new Float64Array(N);
+    const cx = (cols - 1) / 2, cy = (rows - 1) / 2;
+    for (let i = 0; i < N; i++) {
+      const c = i % cols, r = (i / cols) | 0, j = rnd();
+      switch (state.pattern) {
+        case 'rise':  keys[i] = (rows - 1 - r) + j * 2.6; break;            // bottom up, ragged waterline
+        case 'sweep': keys[i] = c + r + j * 3.2; break;                     // diagonal, top-left first
+        case 'bloom': keys[i] = Math.hypot(c - cx, r - cy) + j * 2.6; break; // centre outwards
+        default:      keys[i] = j;                                          // even random scatter
+      }
+    }
+    const order = new Uint32Array(N);
+    for (let i = 0; i < N; i++) order[i] = i;
+    order.sort((a, b) => keys[a] - keys[b]);
+    return order;
+  }
+  function relayout() {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    if (W < 20 || H < 20) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    staticCanvas.width = canvas.width;
+    staticCanvas.height = canvas.height;
+    let target = SIZES.find((z) => z[0] === state.size)[2];
+    if (Math.min(W, H) < 560) target *= 0.78;
+    // Columns and rows are rounded so the grid lands exactly on the screen edges: no clipped squares.
+    const cols = Math.max(4, Math.round(W / target));
+    const rows = Math.max(3, Math.round(H / (W / cols)));
+    const cw = canvas.width / cols, ch = canvas.height / rows;
+    const cell = Math.min(cw, ch);
+    const gap = Math.max(1.5 * dpr, cell * 0.085);
+    const tile = Math.max(3, Math.round(cell - 2 * gap));
+    const N = cols * rows;
+    const x = new Float32Array(N), y = new Float32Array(N), diag = new Float32Array(N), shade = new Uint8Array(N);
+    const rnd = mulberry32(state.seed ^ 0x5bd1e995);
+    for (let i = 0; i < N; i++) {
+      const c = i % cols, r = (i / cols) | 0;
+      x[i] = Math.round(c * cw + (cw - tile) / 2);
+      y[i] = Math.round(r * ch + (ch - tile) / 2);
+      diag[i] = (c / Math.max(1, cols - 1) + r / Math.max(1, rows - 1)) / 2;
+      shade[i] = Math.floor(rnd() * SHADES.length);
+    }
+    grid = { N, cols, rows, tile, x, y, diag, shade, order: computeOrder(cols, rows) };
+    buildSprites();
+    prevCanvas = null;
+    fx.fade = null;
+    drawn.valid = false;
+    paintRequested = true;
+  }
+
+  // Square k of a cycle takes the colour of the subject studied at the middle of its time slot.
+  function tileSprite(cell, v, k) {
+    const id = v.preview ? state.subject : subjectAt((v.cycle + (k + 0.5) / grid.N) * T());
+    return sprites[id][grid.shade[cell]];
+  }
+  function drawAt(g, sprite, cell, scale = 1, alpha = 1) {
+    const x = grid.x[cell], y = grid.y[cell];
+    if (scale >= 0.999 && alpha >= 0.999) { g.drawImage(sprite, x, y); return; }
+    const t = grid.tile, s = t * scale, o = (t - s) / 2;
+    g.globalAlpha = alpha;
+    g.drawImage(sprite, x + o, y + o, s, s);
+    g.globalAlpha = 1;
+  }
+  function makeView(p, cycle, preview, e) {
+    const f = p * grid.N;
+    const completed = Math.min(grid.N, Math.floor(f));
+    return { p, cycle, preview, e, completed, q: completed < grid.N ? f - completed : 0 };
+  }
+  function currentView(now) {
+    if (fx.preview) {
+      const p = (now - fx.preview.start) / PREVIEW_MS;
+      if (p < 1) return makeView(Math.max(0, p), 0, true, Math.max(0, p) * T());
+      endPreview(now);
+    }
+    const e = elapsed(now), t = T();
+    if (state.mode === 'timer') return makeView(Math.min(1, e / t), 0, false, e);
+    const cycle = Math.floor(e / t);
+    return makeView((e - cycle * t) / t, cycle, false, e);
+  }
+  function rebuildStatic(v) {
+    sctx.clearRect(0, 0, staticCanvas.width, staticCanvas.height);
+    for (let k = 0; k < grid.N; k++) {
+      const cell = grid.order[k];
+      drawAt(sctx, k < v.completed ? tileSprite(cell, v, k) : ghost, cell);
+    }
+    drawn.valid = true;
+    drawn.cycle = v.cycle;
+    drawn.preview = v.preview;
+    drawn.completed = v.completed;
+    paintRequested = true;
+  }
+  function fillRemaining() {
+    const v = { cycle: drawn.cycle, preview: drawn.preview };
+    for (let k = drawn.completed; k < grid.N; k++) drawAt(sctx, tileSprite(grid.order[k], v, k), grid.order[k]);
+    drawn.completed = grid.N;
+  }
+  function snapshotToPrev() {
+    if (!prevCanvas) prevCanvas = document.createElement('canvas');
+    prevCanvas.width = staticCanvas.width;
+    prevCanvas.height = staticCanvas.height;
+    prevCanvas.getContext('2d').drawImage(staticCanvas, 0, 0);
+  }
+  // A full screen shimmers, then (when the grid starts over) fades away.
+  function startFinale(now, thenFade) {
+    if (reduceMotion) { fx.shimmer = null; fx.fade = null; return; }
+    fx.shimmer = { start: now };
+    fx.fade = thenFade ? { start: now + SHIMMER_MS } : null;
+  }
+  function endPreview(now) {
+    fx.preview = null;
+    if (drawn.valid && drawn.preview) {
+      fillRemaining();
+      snapshotToPrev();
+      startFinale(now, true);
+    }
+    drawn.valid = false;
+  }
+  function syncStatic(v) {
+    if (drawn.valid && !drawn.preview && !v.preview && state.mode === 'stopwatch' && v.cycle === drawn.cycle + 1) {
+      fillRemaining();
+      snapshotToPrev();
+      startFinale(Date.now(), true);
+      chime(true);
+      drawn.valid = false;
+    }
+    if (!drawn.valid || v.cycle !== drawn.cycle || v.preview !== drawn.preview || v.completed < drawn.completed) {
+      rebuildStatic(v);
+      return;
+    }
+    while (drawn.completed < v.completed) {
+      const k = drawn.completed++;
+      const cell = grid.order[k];
+      drawAt(sctx, tileSprite(cell, v, k), cell);
+    }
+  }
+  function render(v, now) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(staticCanvas, 0, 0);
+    if (v.q > 0 && v.completed < grid.N) {
+      const k = v.completed, cell = grid.order[k];
+      const grow = 1 - Math.pow(1 - v.q, 3);
+      drawAt(ctx, tileSprite(cell, v, k), cell, grow, Math.min(1, v.q * 3));
+    }
+    let layer = 1;
+    if (fx.fade) {
+      const a = 1 - (now - fx.fade.start) / FADE_MS;
+      if (a <= 0 || !prevCanvas) {
+        fx.fade = null;
+      } else {
+        layer = Math.min(1, a);
+        ctx.globalAlpha = layer;
+        ctx.drawImage(prevCanvas, 0, 0);
+        ctx.globalAlpha = 1;
+      }
+    }
+    if (fx.shimmer) {
+      const t = (now - fx.shimmer.start) / SHIMMER_MS;
+      if (t >= 1) {
+        fx.shimmer = null;
+      } else {
+        const front = -0.2 + t * 1.4, band = 0.13;
+        for (let i = 0; i < grid.N; i++) {
+          const d = Math.abs(grid.diag[i] - front);
+          if (d < band) {
+            ctx.globalAlpha = (1 - d / band) * 0.42 * layer;
+            ctx.drawImage(white, grid.x[i], grid.y[i]);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // ---------- Text ----------
+  const els = {
+    digits: $('digits'), meter: $('meter'), meta: $('meta'), status: $('status'), plateSubject: $('plate-subject'),
+    start: $('start'), reset: $('reset'), fullscreen: $('fullscreen'), preview: $('preview'),
+    durLabel: $('duration-label'), durNote: $('duration-note'), durH: $('dur-h'), durM: $('dur-m'),
+    sound: $('sound'), focusRun: $('focus-run'), focusExit: $('focus-exit'),
+    modeConfirm: $('mode-confirm'), modeConfirmText: $('mode-confirm-text'),
+  };
+  const cache = {};
+  function setText(el, key, val) { if (cache[key] !== val) { cache[key] = val; el.textContent = val; } }
+  const pad = (n) => String(n).padStart(2, '0');
+  function clock(secs, hours) {
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    return h > 0 || hours ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+  function fmtLong(ms) {
+    const m = Math.round(ms / 60000), h = Math.floor(m / 60), r = m % 60;
+    if (!h) return `${r} min`;
+    return r ? `${h} h ${r} min` : `${h} h`;
+  }
+  function fmtInterval(ms) {
+    const s = ms / 1000;
+    if (s < 1) return `${s.toFixed(2)} s`;
+    if (s < 10) return `${s.toFixed(1)} s`;
+    if (s < 90) return `${Math.round(s)} s`;
+    return `${(s / 60).toFixed(1)} min`;
+  }
+  const fmtToday = (ms) => { const m = Math.floor(ms / 60000); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`; };
+  const nf = (n) => n.toLocaleString();
+
+  function updateText(v) {
+    const t = T(), timer = state.mode === 'timer';
+    const secs = timer ? Math.max(0, Math.ceil((t - v.e) / 1000 - 1e-9)) : Math.floor(v.e / 1000);
+    const str = clock(secs, !timer || t >= 3600000);
+    if (cache.digits !== str) {
+      cache.digits = str;
+      els.digits.innerHTML = str.replace(/:/g, '<span class="c">:</span>');
+    }
+    const pct = (v.preview || !timer || !state.done ? v.p : 1) * 100;
+    const width = `${pct.toFixed(2)}%`;
+    if (cache.meter !== width) { cache.meter = width; els.meter.style.width = width; }
+
+    let status;
+    if (v.preview) status = 'Preview';
+    else if (timer && state.done) status = 'Done';
+    else if (state.running) status = 'Running';
+    else status = v.e > 0 ? 'Paused' : 'Ready';
+    setText(els.status, 'status', status);
+
+    const N = grid.N, whole = Math.floor(pct);
+    let meta;
+    if (v.preview) meta = `Preview at ${nf(Math.round(t / PREVIEW_MS))}× speed · ${whole}% filled`;
+    else if (timer && state.done) meta = `Screen full · ${fmtLong(t)} done`;
+    else if (v.e === 0) meta = timer ? `${nf(N)} squares · one every ${fmtInterval(t / N)}` : `${nf(N)} squares · the screen fills every ${fmtLong(t)}`;
+    else if (timer) meta = `${whole}% filled · ${nf(v.completed)} of ${nf(N)} squares`;
+    else meta = `Screen ${v.cycle + 1} · ${whole}% filled · fills every ${fmtLong(t)}`;
+    setText(els.meta, 'meta', meta);
+  }
+  function updateToday() {
+    for (const s of SUBJECTS) setText($(`today-${s.id}`), `today-${s.id}`, `${fmtToday(state.tally.ms[s.id] || 0)} today`);
+  }
+
+  // ---------- Theme ----------
+  function applyTheme() {
+    const s = SUB[state.subject];
+    const r = document.documentElement.style;
+    r.setProperty('--subj', hsl(s.h, s.s, s.l));
+    r.setProperty('--subj-soft', hsl(s.h, s.s, s.l, 0.1));
+    r.setProperty('--subj-line', hsl(s.h, s.s, s.l, 0.35));
+    r.setProperty('--plate', hsl(s.h, 30, 8, 0.8));
+  }
+
+  // ---------- Sound and wake lock ----------
+  let audio = null;
+  function ensureAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch (_) { audio = null; }
+  }
+  function chime(soft) {
+    if (!state.sound || !audio) return;
+    try {
+      if (audio.state === 'suspended') audio.resume();
+      const t0 = audio.currentTime + 0.05;
+      const notes = soft ? [783.99] : [659.25, 783.99, 987.77, 1318.51];
+      notes.forEach((f, i) => {
+        const o = audio.createOscillator(), g = audio.createGain();
+        const s = t0 + i * 0.18;
+        o.type = 'sine';
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(soft ? 0.08 : 0.16, s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 1.8);
+        o.connect(g);
+        g.connect(audio.destination);
+        o.start(s);
+        o.stop(s + 1.9);
+      });
+    } catch (_) { /* audio unavailable */ }
+  }
+  let wakeLock = null;
+  async function requestWake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (_) { wakeLock = null; }
+  }
+  function releaseWake() {
+    try { if (wakeLock) wakeLock.release(); } catch (_) { /* already released */ }
+    wakeLock = null;
+  }
+
+  // ---------- Actions ----------
+  let resetArmed = 0;
+  function start() {
+    if (state.running) return;
+    if (state.done) resetSession();
+    fx.preview = null;
+    drawn.valid = false;
+    ensureAudio();
+    state.runStart = Date.now();
+    state.running = true;
+    requestWake();
+    save();
+    syncUI();
+  }
+  function pause() {
+    if (!state.running) return;
+    account();
+    state.acc = elapsed();
+    state.running = false;
+    releaseWake();
+    save();
+    syncUI();
+  }
+  const toggleRun = () => (state.running ? pause() : start());
+  function resetSession() {
+    account();
+    Object.assign(state, {
+      running: false, acc: 0, runStart: 0, done: false, seed: newSeed(),
+      segments: [{ at: 0, subject: state.subject }], tallyMark: 0,
+    });
+    resetArmed = 0;
+    fx.shimmer = null;
+    fx.fade = null;
+    releaseWake();
+    relayout();
+    save();
+    syncUI();
+  }
+  function finish(silent) {
+    account();
+    state.acc = T();
+    state.running = false;
+    state.done = true;
+    state.tallyMark = state.acc;
+    releaseWake();
+    save();
+    if (!silent) { chime(false); startFinale(Date.now(), false); }
+    syncUI();
+  }
+  function setSubject(id) {
+    if (id === state.subject || !SUB[id]) return;
+    account();
+    const e = elapsed(), segs = state.segments;
+    if (e === 0) state.segments = [{ at: 0, subject: id }];
+    else if (segs[segs.length - 1].at === e) segs[segs.length - 1].subject = id;
+    else segs.push({ at: e, subject: id });
+    state.subject = id;
+    applyTheme();
+    drawn.valid = false;
+    save();
+    syncUI();
+  }
+  let pendingMode = null;
+  function requestMode(m) {
+    if (m === state.mode) { hideModeConfirm(); return; }
+    if (elapsed() > 0 || state.running) {
+      pendingMode = m;
+      els.modeConfirmText.textContent = `Switch to ${m === 'timer' ? 'Timer' : 'Stopwatch'}? This resets the current session.`;
+      els.modeConfirm.hidden = false;
+      $('mode-confirm-no').focus();
+      return;
+    }
+    applyMode(m);
+  }
+  function hideModeConfirm() { pendingMode = null; els.modeConfirm.hidden = true; }
+  function applyMode(m) {
+    hideModeConfirm();
+    account();
+    state.mode = m;
+    resetSession();
+  }
+  function setDuration(min) {
+    if (elapsed() > 0 || state.running) return;
+    state.durationMin = clamp(Math.round(min), 1, 1439);
+    save();
+    syncUI();
+  }
+  function startPreview() {
+    if (state.running || !grid.N) return;
+    fx.preview = { start: Date.now() };
+    fx.shimmer = null;
+    fx.fade = null;
+    drawn.valid = false;
+  }
+
+  // ---------- Full screen ----------
+  let fsEntered = false, uiTimer = 0;
+  const isFocus = () => document.body.classList.contains('focus');
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  function pokeUi() {
+    if (!isFocus()) return;
+    document.body.classList.add('show-ui');
+    document.body.classList.remove('idle');
+    clearTimeout(uiTimer);
+    uiTimer = setTimeout(() => {
+      document.body.classList.remove('show-ui');
+      document.body.classList.add('idle');
+    }, 2600);
+  }
+  function enterFocus() {
+    if (isFocus()) return;
+    hideModeConfirm();
+    document.body.classList.add('focus');
+    pokeUi();
+    const el = document.documentElement;
+    try {
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) {
+        const p = req.call(el);
+        if (p && p.catch) p.catch(() => { /* browser kept the window size; focus mode still applies */ });
+      }
+    } catch (_) { /* fullscreen not allowed here */ }
+  }
+  function leaveFocus() {
+    document.body.classList.remove('focus', 'show-ui', 'idle');
+    clearTimeout(uiTimer);
+  }
+  function exitFocus() {
+    leaveFocus();
+    if (fsElement()) {
+      try {
+        const p = (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        if (p && p.catch) p.catch(() => {});
+      } catch (_) { /* ignore */ }
+    }
+  }
+  function onFsChange() {
+    if (fsElement()) fsEntered = true;
+    else if (fsEntered) { fsEntered = false; leaveFocus(); }
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+
+  // ---------- Controls ----------
+  const subjectsEl = $('subjects');
+  for (const s of SUBJECTS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'subject';
+    b.id = `subject-${s.id}`;
+    b.dataset.id = s.id;
+    b.style.setProperty('--c', hsl(s.h, s.s, s.l));
+    b.innerHTML = `<span class="sw" aria-hidden="true"></span><span class="txt"><span class="name">${s.name}</span><span class="today" id="today-${s.id}">0m today</span></span>`;
+    b.addEventListener('click', () => setSubject(s.id));
+    subjectsEl.appendChild(b);
+  }
+  const presetsEl = $('presets');
+  for (const [min, label] of PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.id = `preset-${min}`;
+    b.dataset.min = String(min);
+    b.textContent = label;
+    b.addEventListener('click', () => setDuration(min));
+    presetsEl.appendChild(b);
+  }
+  function fillSeg(el, items, key) {
+    for (const [id, label] of items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = `${key}-${id}`;
+      b.dataset.value = id;
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        if (state[key] === id) return;
+        state[key] = id;
+        relayout();
+        save();
+        syncUI();
+      });
+      el.appendChild(b);
+    }
+  }
+  fillSeg($('patterns'), PATTERNS, 'pattern');
+  fillSeg($('sizes'), SIZES, 'size');
+
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => requestMode(b.dataset.mode)));
+  $('mode-confirm-yes').addEventListener('click', () => { if (pendingMode) applyMode(pendingMode); });
+  $('mode-confirm-no').addEventListener('click', hideModeConfirm);
+  els.start.addEventListener('click', toggleRun);
+  els.focusRun.addEventListener('click', toggleRun);
+  els.reset.addEventListener('click', () => {
+    if (!(elapsed() > 0 || state.running || state.done)) return;
+    if (state.done || (resetArmed && Date.now() - resetArmed < 3000)) { resetSession(); return; }
+    resetArmed = Date.now();
+    els.reset.textContent = 'Confirm reset';
+    els.reset.classList.add('armed');
+    setTimeout(() => { if (resetArmed && Date.now() - resetArmed >= 2900) { resetArmed = 0; syncUI(); } }, 3000);
+  });
+  els.fullscreen.addEventListener('click', enterFocus);
+  els.focusExit.addEventListener('click', exitFocus);
+  els.preview.addEventListener('click', startPreview);
+  els.sound.addEventListener('change', () => { state.sound = els.sound.checked; if (state.sound) ensureAudio(); save(); });
+  function onCustomDuration() {
+    const h = clamp(parseInt(els.durH.value, 10) || 0, 0, 23);
+    const m = clamp(parseInt(els.durM.value, 10) || 0, 0, 59);
+    if (h * 60 + m >= 1) setDuration(h * 60 + m);
+    els.durH.value = Math.floor(state.durationMin / 60);
+    els.durM.value = state.durationMin % 60;
+  }
+  els.durH.addEventListener('change', onCustomDuration);
+  els.durM.addEventListener('change', onCustomDuration);
+
+  window.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === 'Space' && tag !== 'button') { e.preventDefault(); toggleRun(); }
+    else if (e.key === 'f' || e.key === 'F') { isFocus() ? exitFocus() : enterFocus(); }
+    else if (e.key === 'Escape') { if (isFocus()) exitFocus(); else hideModeConfirm(); }
+  });
+  window.addEventListener('pointermove', pokeUi);
+  window.addEventListener('pointerdown', () => { ensureAudio(); pokeUi(); });
+  window.addEventListener('dblclick', (e) => {
+    if (isFocus() && !(e.target.closest && e.target.closest('.focus-ui'))) exitFocus();
+  });
+  let resizeRaf = 0;
+  window.addEventListener('resize', () => { cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(relayout); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.running) requestWake();
+    tick();
+  });
+  window.addEventListener('pagehide', () => { account(); save(); });
+
+  function syncUI() {
+    const e = elapsed(), locked = e > 0 || state.running;
+    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+    subjectsEl.querySelectorAll('.subject').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === state.subject)));
+    setText(els.plateSubject, 'plateSubject', SUB[state.subject].name);
+    setText(els.durLabel, 'durLabel', state.mode === 'timer' ? 'Duration' : 'Fill the screen every');
+    presetsEl.querySelectorAll('.chip').forEach((b) => {
+      b.setAttribute('aria-pressed', String(+b.dataset.min === state.durationMin));
+      b.disabled = locked;
+    });
+    if (document.activeElement !== els.durH) els.durH.value = Math.floor(state.durationMin / 60);
+    if (document.activeElement !== els.durM) els.durM.value = state.durationMin % 60;
+    els.durH.disabled = els.durM.disabled = locked;
+    els.durNote.hidden = !locked;
+    $('patterns').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === state.pattern)));
+    $('sizes').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === state.size)));
+    els.sound.checked = state.sound;
+    const label = state.running ? 'Pause' : state.done ? 'Start again' : e > 0 ? 'Resume' : 'Start';
+    els.start.textContent = label;
+    els.focusRun.textContent = label;
+    els.reset.disabled = !locked && !state.done;
+    if (!resetArmed) { els.reset.textContent = 'Reset'; els.reset.classList.remove('armed'); }
+    els.preview.disabled = state.running;
+    updateToday();
+  }
+
+  // ---------- Loop ----------
+  let lastSave = 0;
+  function tick() {
+    if (state.mode === 'timer' && state.running && elapsed() >= T()) finish(false);
+  }
+  setInterval(() => {
+    tick();
+    if (state.running) {
+      account();
+      updateToday();
+      if (Date.now() - lastSave > 5000) { lastSave = Date.now(); save(); }
+    }
+  }, 1000);
+  function frame() {
+    requestAnimationFrame(frame);
+    if (!grid.N) { relayout(); if (!grid.N) return; }
+    const now = Date.now();
+    tick();
+    const v = currentView(now);
+    syncStatic(v);
+    if (paintRequested || state.running || v.preview || fx.shimmer || fx.fade) {
+      render(v, now);
+      paintRequested = false;
+    }
+    updateText(v);
+  }
+
+  // ---------- Boot ----------
+  applyTheme();
+  relayout();
+  if (state.mode === 'timer' && state.running && elapsed() >= T()) finish(true);
+  if (state.running) requestWake();
+  syncUI();
+  requestAnimationFrame(frame);
+  if (loaded.fresh) {
+    save();
+    if (!reduceMotion) setTimeout(startPreview, 700);
+  }
+})();
+</script>
+</body>
+</html>
