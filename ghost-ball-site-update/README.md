@@ -3,6 +3,16 @@
 Everything for adding Ghost Ball to the website. Tap any link below to open that file.
 To install, copy this folder's contents into the site's root folder, next to `index.html`.
 
+## How to add it and open the site
+Ghost Ball goes **inside your existing website**, as project 05 in Projects. It isn't a separate page.
+
+1. On a computer, open your website folder (the one with `index.html` and your `assets` folder).
+2. Copy this folder's contents into it: **replace** `index.html` and `site.webmanifest`, and **merge** the `assets` folder so your own files stay.
+3. **If the site is online**, upload or push it the way you normally do, then open your site → Projects → Ghost Ball (05).
+4. **To check it on your computer first**, use a local server, because double-clicking `index.html` won't run `main.js`. Use VS Code's *Live Server* extension, or run `python3 -m http.server` in the folder and open http://localhost:8000.
+
+Your site's own `assets/css/site.css`, `assets/js/main.js` and images aren't in this folder, because they were never shared. That's why `index.html` looks unstyled if you open it on its own here.
+
 ## Changed files (replace yours)
 - [index.html](index.html): the home page with Ghost Ball added: a tile, a list entry, the About-page shortcut and the full project panel
 - [site.webmanifest](site.webmanifest): the description now mentions Ghost Ball

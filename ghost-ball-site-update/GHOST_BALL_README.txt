@@ -1,33 +1,33 @@
-GHOST BALL: new project 05 for the site
-=======================================
+GHOST BALL, ADDED TO YOUR WEBSITE AS PROJECT 05
+===============================================
 
-Copy everything in this folder into the site's root folder (next to index.html). Every new file is in a new
-folder, so nothing of yours is overwritten except the two files marked "changed" below.
+These files add Ghost Ball to your existing website, inside the Projects section next to the V8, NO Candle,
+TikTok and Bikes projects. It is not a separate page.
 
-CHANGED
-  index.html          - Ghost Ball added as project 05: a tile and index entry on the Projects page, a shortcut in
-                        "Jump into a project", the project panel itself, and links to ghostball.css / ghostball.js.
-                        The meta and Open Graph descriptions now mention it. Nothing else in the file was touched.
-  site.webmanifest    - description mentions Ghost Ball.
+WHAT'S IN THIS FOLDER
+  index.html                         your home page, with Ghost Ball added (replaces your current index.html)
+  site.webmanifest                   description updated (replaces yours)
+  ghost-ball/index.html              the app itself (the "Open the app" button goes here)
+  assets/css/ghostball.css           Ghost Ball styles      } these three go INTO your existing assets folder,
+  assets/js/ghostball.js             Ghost Ball demo        } next to site.css and main.js. Nothing of yours
+  assets/img/ghostball/, assets/media/ghostball/   images and video     } is replaced.
 
-NEW
-  ghost-ball/index.html                    the app itself, so "Open the app" works at /ghost-ball/
-  assets/css/ghostball.css                 styles for the panel (all scoped to gb- classes)
-  assets/js/ghostball.js                   the drag-the-balls demo, and the overlay wiring
-  assets/img/ghostball/                    figures from the app's own working, shot captures, formula images
-  assets/media/ghostball/                  the explainer video (1080p, 14 MB) and its captions (.vtt)
+HOW TO ADD IT (on a computer)
+  1. Open your website folder: the one with index.html and the assets folder (site.css, main.js, your images, CV).
+  2. Copy everything from this folder into it. Say "Replace" for index.html and site.webmanifest, and
+     "Merge" (not replace) for the assets folder, so your own files stay.
+  3. Keep 404.html, robots.txt and the rest of your files as they are.
 
-UNCHANGED: 404.html, robots.txt, and everything else in assets/.
+HOW TO OPEN THE WEBSITE
+  - If your site is online (GitHub Pages, Netlify, Vercel...): upload or push the updated folder the way you
+    normally do, wait a minute, then open your site's link, go to Projects and tap "Ghost Ball" (05).
+  - To look at it on your computer first: double-clicking index.html won't run the site's scripts (main.js is a
+    JavaScript module, which browsers block from plain files). Use a tiny local server instead:
+      VS Code: install the "Live Server" extension, right-click index.html, choose "Open with Live Server".
+      Or in a terminal, inside the website folder:  python3 -m http.server
+      then open http://localhost:8000 in your browser.
 
-HOW IT HOOKS INTO main.js
-  main.js and site.css weren't in the upload, so ghostball.js doesn't depend on them. When #projects/ghostball
-  is opened:
-    - if main.js already opens any panel with a matching data-project, ghostball.js just sets the title bar;
-    - if main.js only knows the original four projects, ghostball.js opens the overlay through the TikTok project
-      and swaps in the Ghost Ball panel, so main.js's own open/close/minimise behaviour still applies.
-  If main.js keeps a list of projects, the cleanest fix is to add "ghostball" to it (number 05, title Ghost Ball).
-  The fallback then never runs.
-
-  The panel reuses the site's own classes (wrap, proj-head, proj-title, tags, proj-lede, kpis, kpi, panel,
-  panel-pad, btn, btn-primary, btn-sm, code-cap, code, caveats), so it should pick up the site's look. Its own
-  pieces (pipeline cards, maths cards, demo, diagrams) are styled in ghostball.css.
+WHY THE PREVIEW LOOKED MESSY
+  The preview was built without your assets folder (site.css, main.js, images), because only index.html,
+  404.html, robots.txt and site.webmanifest were shared. Your own copy of the site has those files, so once
+  these files are added to it, everything (Ghost Ball included) uses your real styles.
