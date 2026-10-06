@@ -1,0 +1,55 @@
+1
+00:00:01,450 --> 00:00:04,800
+Fifteen balls. Six pockets.
+
+2
+00:00:05,920 --> 00:00:08,330
+So which shot is actually on?
+
+3
+00:00:10,450 --> 00:00:12,100
+This is Ghost Ball.
+
+4
+00:00:14,450 --> 00:00:16,410
+Take one photo from above.
+
+5
+00:00:18,450 --> 00:00:23,860
+It finds the table, flattens the perspective, and picks out every ball.
+
+6
+00:00:26,450 --> 00:00:28,350
+Then the maths takes over.
+
+7
+00:00:29,450 --> 00:00:34,600
+It finds the ghost ball: exactly where the white must be at contact.
+
+8
+00:00:35,950 --> 00:00:41,940
+It measures how much room the pocket gives, and turns your aim error into a real pot chance.
+
+9
+00:00:43,450 --> 00:00:51,770
+Fifty-nine percent for a beginner. Eighty-eight for a club player. Ninety-nine if you're strong.
+
+10
+00:00:54,200 --> 00:01:00,040
+Straight pots. Banks. Kicks. Combinations.
+
+11
+00:01:00,950 --> 00:01:04,580
+Every shot on the table, ranked best first.
+
+12
+00:01:05,950 --> 00:01:10,320
+Plus where to strike the white, and where it goes next.
+
+13
+00:01:12,450 --> 00:01:13,750
+Ghost Ball.
+
+14
+00:01:14,190 --> 00:01:16,920
+Know your shot before you take it.
