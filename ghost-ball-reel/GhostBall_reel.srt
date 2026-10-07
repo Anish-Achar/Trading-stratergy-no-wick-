@@ -19,37 +19,45 @@ Take one photo from above.
 It finds the table, flattens the perspective, and picks out every ball.
 
 6
-00:00:26,450 --> 00:00:28,350
-Then the maths takes over.
+00:00:26,450 --> 00:00:27,750
+Missed something?
 
 7
-00:00:29,450 --> 00:00:34,600
-It finds the ghost ball: exactly where the white must be at contact.
+00:00:28,200 --> 00:00:32,330
+Fix the corners, add a ball, or tap the white yourself.
 
 8
-00:00:35,950 --> 00:00:41,940
-It measures how much room the pocket gives, and turns your aim error into a real pot chance.
+00:00:34,450 --> 00:00:36,350
+Then the maths takes over.
 
 9
-00:00:43,450 --> 00:00:51,770
-Fifty-nine percent for a beginner. Eighty-eight for a club player. Ninety-nine if you're strong.
+00:00:37,450 --> 00:00:42,600
+It finds the ghost ball: exactly where the white must be at contact.
 
 10
-00:00:54,200 --> 00:01:00,040
-Straight pots. Banks. Kicks. Combinations.
+00:00:43,950 --> 00:00:49,940
+It measures how much room the pocket gives, and turns your aim error into a real pot chance.
 
 11
-00:01:00,950 --> 00:01:04,580
-Every shot on the table, ranked best first.
+00:00:51,450 --> 00:00:59,770
+Fifty-nine percent for a beginner. Eighty-eight for a club player. Ninety-nine if you're strong.
 
 12
-00:01:05,950 --> 00:01:10,320
-Plus where to strike the white, and where it goes next.
+00:01:02,200 --> 00:01:08,040
+Straight pots. Banks. Kicks. Combinations.
 
 13
-00:01:12,450 --> 00:01:13,750
-Ghost Ball.
+00:01:08,950 --> 00:01:12,580
+Every shot on the table, ranked best first.
 
 14
-00:01:14,190 --> 00:01:16,920
+00:01:13,950 --> 00:01:18,320
+Plus where to strike the white, and where it goes next.
+
+15
+00:01:20,450 --> 00:01:21,750
+Ghost Ball.
+
+16
+00:01:22,190 --> 00:01:24,920
 Know your shot before you take it.
