@@ -1,7 +1,8 @@
 # Ghost Ball: motion-graphics reel
 
-A 90-second showreel piece for **Ghost Ball**, the pool and snooker shot assistant (project 05 on the website).
-It shows what the app does, step by step, as kinetic type, camera moves and diagrams cut to the music.
+An 82-second showreel piece for **Ghost Ball**, the pool and snooker shot assistant (project 05 on the website).
+It shows what the app does, step by step, as kinetic type, camera moves and diagrams cut to the music, with the scenes
+morphing into each other: the ghost ring becomes the logo, the phone's photo becomes the blueprint, the cue ball becomes the logo again.
 
 | File | What it is |
 |---|---|
@@ -14,16 +15,16 @@ It shows what the app does, step by step, as kinetic type, camera moves and diag
 | Time | Section | On screen |
 |---|---|---|
 | 0:00 | The problem | A rack drops ball by ball, the white breaks it, every possible line flickers on, then all but one collapse |
-| 0:10 | Drop 1 | The camera dives into the ghost ball and the logo slams in |
+| 0:10 | Drop 1 | The camera carries the ghost ring off the table; it morphs into the logo's mark and the name slams in |
 | 0:14 | One photo | Through the logo's ring into a viewfinder that levels over the table; the shutter fires and the photo lands in the app |
 | 0:18 | Computer vision | Edge scan, the four cushion lines lock, the perspective flattens, a distance map ripples out and the 8 balls are found and classified |
 | 0:26 | Fix it yourself | Three phones in a 3D carousel: drag a corner handle, add a missed ball, tap the white, each with a loupe on the touch |
-| 0:34 | The maths | The table turns into a blueprint: the ghost ball, the 56° cut, the 5.2° pocket window, then the window becomes a bell curve |
-| 0:51 | Pot chance | The curve tightens with skill: 59% beginner, 88% club, 99% strong |
-| 1:02 | Drop 2 | Straight, bank, kick and combination shots whip past on the beat, with light trails along each real path |
-| 1:08 | Ranked | All 23 pots, best first, scrolling in the app |
-| 1:13 | Spin | Where to strike the white (stun, top, screw) and where it goes after contact |
-| 1:20 | End card | Final hit on the logo, the app in 3D, "Know your shot before you take it." |
+| 0:34 | The maths | The phone's photo flies out, flattens and dissolves into a blueprint: the ghost ball, the 56° cut, the 5.2° pocket window, then the window becomes a bell curve |
+| 0:51 | Pot chance | The curve tightens with skill: 88% club, 59% beginner, 99% strong |
+| 0:56 | Drop 2 | Straight, bank, kick and combination shots whip past on the beat, with light trails along each real path |
+| 1:02 | Ranked | All 23 pots, best first, scrolling in the app; the top one lights up |
+| 1:07 | Spin | Its red ball flies over into the spin diagram: where to strike the white (stun, top, screw) and where it goes after contact |
+| 1:14 | End card | The cue ball shrinks into the logo's mark on the final hit; the app in 3D, "Know your shot before you take it." |
 
 ## How it was made
 
